@@ -91,5 +91,44 @@ function ColorContext:AverageColorsHSV(colors)
         alpha = 255
     }
 end
+-- Add this new function to the ColorContext.lua file.
+
+--- Divides a palette into a list of smaller, equally-sized ramps.
+-- @param palette The Aseprite palette object to divide.
+-- @param rampSize The desired number of colors in each ramp.
+-- @return A table containing all the generated ramps.
+function ColorContext:GetColorRampsByDivision(palette, rampSize)
+    -- FIX: The rampSize from the dialog is a string. Convert it to a number
+    -- before using it in comparisons or loops.
+    rampSize = tonumber(rampSize)
+
+    local allRamps = {}
+    if not palette or #palette == 0 or not rampSize or rampSize <= 0 then
+        return allRamps
+    end
+
+    local currentRamp = {}
+    -- Loop through the palette, 0-indexed.
+    for i = 0, #palette - 1 do
+        -- Add the color (as a custom ColorContext object) to the current ramp.
+        table.insert(currentRamp, self:Create(palette:getColor(i)))
+
+        -- If the current ramp is full, add it to our list of all ramps
+        -- and start a new, empty one.
+        if #currentRamp == rampSize then
+            table.insert(allRamps, currentRamp)
+            currentRamp = {}
+        end
+    end
+
+    -- After the loop, if there's a partially-filled ramp left over,
+    -- add that one to the list as well.
+    if #currentRamp > 0 then
+        table.insert(allRamps, currentRamp)
+    end
+
+    return allRamps
+end
+
 
 return ColorContext

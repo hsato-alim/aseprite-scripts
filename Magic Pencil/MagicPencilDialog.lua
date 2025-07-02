@@ -367,72 +367,78 @@ local function MagicPencilDialog(options)
         RefreshDialog()
     end
 
-    local function SelectMode(mode, skipColor)
-        selectedMode = mode
+local function SelectMode(mode, skipColor)
+    selectedMode = mode
 
-        dialog --
-        :modify{id = "selectedMode", option = selectedMode} --
-        :modify{id = selectedMode, selected = true}
+    dialog --
+    :modify{id = "selectedMode", option = selectedMode} --
+    :modify{id = selectedMode, selected = true}
 
-        local useMaskColor =
-            ModeProcessorProvider:Get(selectedMode).useMaskColor
+    local useMaskColor =
+        ModeProcessorProvider:Get(selectedMode).useMaskColor
 
-        if not skipColor then
-            if useMaskColor then
-                app.fgColor = MagicPink
-                app.bgColor = MagicTeal
-            else
-                app.fgColor = lastFgColor
-                app.bgColor = lastBgColor
-            end
+    if not skipColor then
+        if useMaskColor then
+            app.fgColor = MagicPink
+            app.bgColor = MagicTeal
+        else
+            app.fgColor = lastFgColor
+            app.bgColor = lastBgColor
         end
-
-        local isChange = selectedMode == Mode.Colorize or selectedMode ==
-                             Mode.Desaturate or selectedMode == Mode.Shift
-
-        dialog --
-        :modify{id = "outlineColor", visible = selectedMode == Mode.OutlineLive} --
-        :modify{id = "outlineSize", visible = selectedMode == Mode.OutlineLive} -- 
-        :modify{
-            id = "outlineOtherColors",
-            visible = selectedMode == Mode.OutlineLive
-        } --
-        :modify{
-            id = "outlineErasingEnable",
-            visible = selectedMode == Mode.OutlineLive
-        } --
-        :modify{id = "graffitiPower", visible = selectedMode == Mode.Graffiti} --
-        :modify{
-            id = "graffitiSpeckEnabled",
-            visible = selectedMode == Mode.Graffiti
-        } --
-        :modify{
-            id = "graffitiSpeckPower",
-            visible = selectedMode == Mode.Graffiti and
-                dialog.data.graffitiSpeckEnabled
-        } --
-        :modify{id = "colorModel", visible = selectedMode == Mode.Shift} --
-        :modify{id = "shiftFirstOption", visible = selectedMode == Mode.Shift} --
-        :modify{
-            id = "shiftFirstPercentage",
-            visible = selectedMode == Mode.Shift and
-                dialog.data.shiftFirstOption
-        } --
-        :modify{id = "shiftSecondOption", visible = selectedMode == Mode.Shift} --
-        :modify{
-            id = "shiftSecondPercentage",
-            visible = selectedMode == Mode.Shift and
-                dialog.data.shiftSecondOption
-        } --
-        :modify{id = "shiftThirdOption", visible = selectedMode == Mode.Shift} --
-        :modify{
-            id = "shiftThirdPercentage",
-            visible = selectedMode == Mode.Shift and
-                dialog.data.shiftThirdOption
-        } --
-        :modify{id = "indexedModeSeparator", visible = isChange} --
-        :modify{id = "indexedMode", visible = isChange} --
     end
+
+    local isChange = selectedMode == Mode.Colorize or selectedMode ==
+                         Mode.Desaturate or selectedMode == Mode.Shift
+
+    -- STAGE 1 CHANGE: Add visibility logic for the new UI elements.
+    local isShading = selectedMode == Mode.Shading
+
+    dialog --
+    :modify{id = "outlineColor", visible = selectedMode == Mode.OutlineLive} --
+    :modify{id = "outlineSize", visible = selectedMode == Mode.OutlineLive} -- 
+    :modify{
+        id = "outlineOtherColors",
+        visible = selectedMode == Mode.OutlineLive
+    } --
+    :modify{
+        id = "outlineErasingEnable",
+        visible = selectedMode == Mode.OutlineLive
+    } --
+    :modify{id = "graffitiPower", visible = selectedMode == Mode.Graffiti} --
+    :modify{
+        id = "graffitiSpeckEnabled",
+        visible = selectedMode == Mode.Graffiti
+    } --
+    :modify{
+        id = "graffitiSpeckPower",
+        visible = selectedMode == Mode.Graffiti and
+            dialog.data.graffitiSpeckEnabled
+    } --
+    :modify{id = "colorModel", visible = selectedMode == Mode.Shift} --
+    :modify{id = "shiftFirstOption", visible = selectedMode == Mode.Shift} --
+    :modify{
+        id = "shiftFirstPercentage",
+        visible = selectedMode == Mode.Shift and
+            dialog.data.shiftFirstOption
+    } --
+    :modify{id = "shiftSecondOption", visible = selectedMode == Mode.Shift} --
+    :modify{
+        id = "shiftSecondPercentage",
+        visible = selectedMode == Mode.Shift and
+            dialog.data.shiftSecondOption
+    } --
+    :modify{id = "shiftThirdOption", visible = selectedMode == Mode.Shift} --
+    :modify{
+        id = "shiftThirdPercentage",
+        visible = selectedMode == Mode.Shift and
+            dialog.data.shiftThirdOption
+    } --
+    :modify{id = "indexedModeSeparator", visible = isChange} --
+    :modify{id = "indexedMode", visible = isChange} --
+    -- STAGE 1 CHANGE: Toggle visibility for ramp size controls.
+    :modify{id = "rampSizeLabel", visible = isShading}
+    :modify{id = "rampSize", visible = isShading}
+end
 
     local resetColors = false
     local resetColorsTimer = Timer {
@@ -617,7 +623,19 @@ local function MagicPencilDialog(options)
     AddMode(Mode.Colorize, "Colorize")
     AddMode(Mode.Desaturate, "Desaturate")
     AddMode(Mode.Shift, "Shift")
-    AddMode(Mode.Shading, "Shading") -- MINIMAL CHANGE 2: Add Shading to the main radio button list.
+    AddMode(Mode.Shading, "Shading")
+
+    -- Add the "Ramp Size" label and combobox to the dialog.
+    dialog:label{ id = "rampSizeLabel", text = "Ramp Size:", visible = false }
+    -- FIX: Use a sequence (array-like table) of strings to guarantee the
+    -- dropdown options are sorted numerically. The default option is set
+    -- to "8" (as a string).
+    dialog:combobox{
+        id = "rampSize",
+        options = { "2", "4", "8", "16", "32" },
+        option = "8",
+        visible = false
+    }
 
     local onShiftOptionClick = function()
         dialog --
