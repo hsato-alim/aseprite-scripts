@@ -526,7 +526,8 @@ local function MagicPencilDialog(options)
         options = {
             Mode.Regular, Mode.Graffiti, Mode.OutlineLive, Mode.Cut, Mode.Merge,
             Mode.Selection, Mode.Mix, Mode.MixProportional, Mode.Outline,
-            Mode.Colorize, Mode.Desaturate, Mode.Shift
+            Mode.Colorize, Mode.Desaturate, Mode.Shift,
+            Mode.Shading -- MINIMAL CHANGE 1: Add Shading to the minimized dropdown.
         },
         visible = isMinimized,
         onchange = function() SelectMode(dialog.data.selectedMode) end
@@ -616,6 +617,7 @@ local function MagicPencilDialog(options)
     AddMode(Mode.Colorize, "Colorize")
     AddMode(Mode.Desaturate, "Desaturate")
     AddMode(Mode.Shift, "Shift")
+    AddMode(Mode.Shading, "Shading") -- MINIMAL CHANGE 2: Add Shading to the main radio button list.
 
     local onShiftOptionClick = function()
         dialog --
