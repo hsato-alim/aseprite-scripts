@@ -49,21 +49,21 @@ function ShadingMode:Process(change, sprite, lastCel, options)
         if foundRamp then
             local newColorObject = nil
 
-            -- Implement "stop at edge" logic instead of wrapping.
+            -- USABILITY FIX: Swap mouse button logic for more intuitive feel.
             if leftButtonPressed then
-                -- Cycle forward, but only if we are not at the end of the ramp.
-                if foundIndexInRamp < #foundRamp then
-                    newColorObject = foundRamp[foundIndexInRamp + 1]
-                end
-
-            elseif rightPressed then
-                -- Cycle backward, but only if we are not at the beginning of the ramp.
+                -- LMB: Cycle backward (shift left), stopping at the beginning.
                 if foundIndexInRamp > 1 then
                     newColorObject = foundRamp[foundIndexInRamp - 1]
                 end
+
+            elseif rightPressed then
+                -- RMB: Cycle forward (shift right), stopping at the end.
+                if foundIndexInRamp < #foundRamp then
+                    newColorObject = foundRamp[foundIndexInRamp + 1]
+                end
             end
 
-            -- FINAL FEATURE: Check if the potential new color is transparent.
+            -- Check if the potential new color is transparent.
             -- If it is, we set it back to nil so it won't be drawn.
             if newColorObject and ColorContext:IsTransparent(newColorObject) then
                 newColorObject = nil
