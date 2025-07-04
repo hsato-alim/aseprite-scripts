@@ -107,18 +107,70 @@ function ShadingMode:Process(change, sprite, lastCel, options)
     local primaryRampNumber = math.floor(sourceIndexInPalette / rampSize) + 1
 
     local shiftedPrimarySourceIndex = sourceIndexInPalette
+    local primarySourceDidShift = false
     if options["rampCheck" .. primaryRampNumber] then -- Only consider shifting source if its own ramp is active
+        local initiallyShiftedIndex = sourceIndexInPalette
         if leftButtonPressed then
-            shiftedPrimarySourceIndex = activeLut.shiftLeft[sourceIndexInPalette]
+            initiallyShiftedIndex = activeLut.shiftLeft[sourceIndexInPalette]
         elseif rightPressed then
-            shiftedPrimarySourceIndex = activeLut.shiftRight[sourceIndexInPalette]
+            initiallyShiftedIndex = activeLut.shiftRight[sourceIndexInPalette]
+        end
+
+        if initiallyShiftedIndex ~= sourceIndexInPalette then
+            shiftedPrimarySourceIndex = initiallyShiftedIndex
+            primarySourceDidShift = true
         end
     end
-    local targetLocalIndexInRamp = shiftedPrimarySourceIndex % rampSize
+    local targetLocalIndexInRamp = shiftedPrimarySourceIndex % rampSize -- Will be local index of original if no shift occurred
 
     -- Process pixels
     for _, pixel in ipairs(change.pixels) do
-        local originalColor = pixel.color
+        -- Determine original cel pixel's transparency
+        local originalCelX = pixel.x - lastCel.position.x
+        local originalCelY = pixel.y - lastCel.position.y
+        local originalCelValue = 0 -- Default to transparent for safety if getPixel fails, though it shouldn't.
+        -- Ensure coordinates are within image bounds before calling getPixel
+        if originalCelX >= 0 and originalCelX < image.width and originalCelY >= 0 and originalCelY < image.height then
+            originalCelValue = lastCel.image:getPixel(originalCelX, originalCelY)
+        else
+            goto continue_pixel_loop -- Pixel from change data is outside cel bounds, skip.
+        end
+
+        local isOriginalCelPixelTransparent = false
+        if sprite.colorMode == ColorMode.INDEXED then
+            isOriginalCelPixelTransparent = (originalCelValue == sprite.transparentColorIndex)
+        elseif sprite.colorMode == ColorMode.RGB then -- Check for RGBA
+            local r, g, b, a = palette:getColor(originalCelValue):rgba() -- This might be problematic if originalCelValue is not a palette index
+                                                                      -- For true RGBA images, lastCel.image:getPixel() returns a color value not an index.
+                                                                      -- A better check for RGBA would be directly on the color value if possible,
+                                                                      -- or convert to a color object that ColorContext can understand.
+                                                                      -- For now, assuming indexed or that getColor().alpha is representative.
+                                                                      -- A safer RGBA check if getPixel returns a direct color:
+                                                                      -- local tempColor = app.Color(originalCelValue)
+                                                                      -- isOriginalCelPixelTransparent = (tempColor.alpha == 0)
+                                                                      -- However, Aseprite API for Image:getPixel on RGBA images returns a number that needs app.pixelColor.
+                                                                      -- Let's use a robust way if ColorContext can handle raw pixel values from getPixel.
+                                                                      -- Simpler: if it's RGB, assume it's not transparent unless alpha is explicitly 0.
+                                                                      -- The most common case is indexed, so sprite.transparentColorIndex is key.
+                                                                      -- For RGB, if there's no alpha or alpha is full, it's opaque.
+                                                                      -- This part might need refinement based on how pixel.color from `change` interacts with `ColorContext` for RGBA direct values.
+                                                                      -- Given the script heavily relies on palette indices, focus on INDEXED mode.
+            local tempColor = palette:getColor(originalCelValue) -- This assumes originalCelValue is an index.
+            if tempColor.alpha == 0 then
+                 isOriginalCelPixelTransparent = true
+            end
+        elseif sprite.colorMode == ColorMode.GRAY then
+            local gray, alpha = palette:getColor(originalCelValue):graya()
+            if alpha == 0 then
+                isOriginalCelPixelTransparent = true
+            end
+        end
+
+        if isOriginalCelPixelTransparent then
+            goto continue_pixel_loop -- Skip this pixel entirely if the cel was originally transparent here
+        end
+
+        local originalColor = pixel.color -- This is the color from the brush stroke/change.pixels
         local currentIndexInPalette = -1
         for i = 0, #palette - 1 do
             if ColorContext:Compare(ColorContext:Create(palette:getColor(i)), originalColor) then
@@ -153,24 +205,22 @@ function ShadingMode:Process(change, sprite, lastCel, options)
                 end
             end
         else
-            -- Pixel is in a SECONDARY RAMP: Project targetLocalIndexInRamp
-            local currentPixelRampStartIndex = (currentPixelRampNumber - 1) * rampSize
-            local projectedIndex = currentPixelRampStartIndex + targetLocalIndexInRamp
+            -- Pixel is in a SECONDARY RAMP: Project targetLocalIndexInRamp,
+            -- but only if the primary source actually shifted.
+            if primarySourceDidShift then
+                local currentPixelRampStartIndex = (currentPixelRampNumber - 1) * rampSize
+                local projectedIndex = currentPixelRampStartIndex + targetLocalIndexInRamp
 
-            -- Ensure projectedIndex is a valid index within the palette
-            if projectedIndex >= 0 and projectedIndex < #palette then
-                 -- And ensure it's actually within the conceptual bounds of its ramp
-                 -- (e.g. if rampSize is 8, local index should be 0-7. targetLocalIndexInRamp is already 0-7)
-                 -- This check is mostly to ensure that `currentPixelRampStartIndex + targetLocalIndexInRamp`
-                 -- doesn't accidentally exceed palette bounds if the last ramp is smaller than rampSize.
-                 -- However, `palette:getColor(projectedIndex)` will return nil if out of true palette bounds.
-                newIndexInPalette = projectedIndex
+                -- Ensure projectedIndex is a valid index within the palette
+                if projectedIndex >= 0 and projectedIndex < #palette then
+                    newIndexInPalette = projectedIndex
+                else
+                    -- If projection is out of overall palette bounds, do not change.
+                    newIndexInPalette = currentIndexInPalette
+                end
             else
-                 -- This case should be rare if targetLocalIndexInRamp is always < rampSize
-                 -- and currentPixelRampStartIndex is valid.
-                 -- Potentially clamp to last color of the current secondary ramp if something is off.
-                 -- For now, if projection is out of palette, it means no change.
-                 newIndexInPalette = currentIndexInPalette
+                -- If primary source didn't shift, secondary ramps also don't change via projection.
+                newIndexInPalette = currentIndexInPalette
             end
         end
 
