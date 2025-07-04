@@ -10,7 +10,7 @@ local MagicTeal = Color {red = 0, green = 128, blue = 128, alpha = 128}
 
 local ColorModels = {HSV = "HSV", HSL = "HSL", RGB = "RGB"}
 
--- FIX: Restore all original helper functions that were accidentally deleted.
+-- ... (The original script's helper functions remain unchanged) ...
 local function RectangleContains(rect, x, y)
     return x >= rect.x and x <= rect.x + rect.width - 1 and --
     y >= rect.y and y <= rect.y + rect.height - 1
@@ -158,6 +158,7 @@ local function CalculateChange(previous, next, canExtend)
     }
 end
 
+
 local function MagicPencilDialog(options)
     local dialog
     local isRefresh = false
@@ -168,11 +169,21 @@ local function MagicPencilDialog(options)
     local lastFgColor = ColorContext:Copy(app.fgColor)
     local lastBgColor = ColorContext:Copy(app.bgColor)
     local isMinimized = options.isminimized
+    
+    local toleranceSlider
 
     local function UpdateRampsUI()
         if not dialog or not dialog.data.rampSize then return end
         local rampSize = tonumber(dialog.data.rampSize)
         if not rampSize then return end
+
+        if toleranceSlider then
+            dialog:modify{ id="shadingTolerance", max = rampSize - 1 }
+            if dialog.data.shadingTolerance > rampSize - 1 then
+                dialog:modify{ id="shadingTolerance", value = rampSize - 1 }
+            end
+        end
+
         local allRamps = ColorContext:GetColorRampsByDivision(app.activeSprite.palettes[1], rampSize)
         for i = 1, 32 do
             local ramp = allRamps[i]
@@ -219,7 +230,10 @@ local function MagicPencilDialog(options)
               :modify{id = "indexedMode", visible = isRGB and isChange, enabled = isRGB}
               :modify{id = "rampSizeLabel", visible = not isMinimized and isShading}
               :modify{id = "rampSize", visible = not isMinimized and isShading}
+              :modify{id = "shadingToleranceLabel", visible = not isMinimized and isShading}
+              :modify{id = "shadingTolerance", visible = not isMinimized and isShading}
               :modify{id = "rampsSeparator", visible = not isMinimized and isShading}
+        -- FIX: Use dialog:modify to safely change widget visibility.
         for i = 1, 32 do
             dialog:modify{ id="rampCheck" .. i, visible = not isMinimized and isShading }
             dialog:modify{ id="rampShades" .. i, visible = not isMinimized and isShading }
@@ -333,6 +347,8 @@ local function MagicPencilDialog(options)
               :modify{id = "indexedMode", visible = isChange}
               :modify{id = "rampSizeLabel", visible = isShading}
               :modify{id = "rampSize", visible = isShading}
+              :modify{id = "shadingToleranceLabel", visible = isShading}
+              :modify{id = "shadingTolerance", visible = isShading}
               :modify{id = "rampsSeparator", visible = isShading}
         if isShading then
             UpdateRampsUI()
@@ -411,10 +427,12 @@ local function MagicPencilDialog(options)
     AddMode(Mode.Shading, "Shading")
     
     dialog:label{ id = "rampSizeLabel", text = "Ramp Size:", visible = false }:combobox{ id = "rampSize", options = { "2", "4", "8", "16", "32" }, option = "8", visible = false, onchange = UpdateRampsUI }
+    dialog:label{ id = "shadingToleranceLabel", text = "Tolerance:", visible = false }
+    toleranceSlider = dialog:slider{ id = "shadingTolerance", min = 0, max = 7, value = 0, visible = false }
     dialog:separator{ id = "rampsSeparator", text = "Active Ramps", visible = false }
     for i = 1, 32 do
-        dialog:check{ id = "rampCheck" .. i, text = "", selected = true, visible = false, onclick = function() end }
-              :shades{ id = "rampShades" .. i, colors = {}, visible = false, onclick = function() local check = dialog:find("rampCheck" .. i); check.selected = not check.selected end }:newrow()
+        local check = dialog:check{ id = "rampCheck" .. i, text = "", selected = true, visible = false }
+        dialog:shades{ id = "rampShades" .. i, colors = {}, visible = false, onclick = function() check.selected = not check.selected end }:newrow()
     end
 
     local onShiftOptionClick = function()
