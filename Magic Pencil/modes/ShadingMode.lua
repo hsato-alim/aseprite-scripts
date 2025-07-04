@@ -140,7 +140,7 @@ function ShadingMode:Process(change, sprite, lastCel, options)
                         -- The transparency of newColor was already checked by LUT generator.
                         -- If not, an additional check here would be:
                         -- if not ColorContext:IsTransparent(ColorContext:Create(newColor)) then
-                        drawPixel(pixel.x - lastCel.position.x, pixel.y - lastCel.position.y, newColor)
+                        image:drawPixel(pixel.x - lastCel.position.x, pixel.y - lastCel.position.y, newColor)
                         -- end
                     end
                 end
