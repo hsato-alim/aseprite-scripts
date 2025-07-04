@@ -71,37 +71,69 @@ function ShadingMode:Process(change, sprite, lastCel, options)
     if rightPressed then shiftAmountForSmartSource = 1 end
     if shiftAmountForSmartSource == 0 then return end -- No button pressed
 
-    -- Smart Source: Find the single lightest/darkest color in the stroke
+    -- Smart Source: Find the single lightest/darkest color IN THE EXISTING CEL IMAGE
     local sourceIndexInPalette = -1
-    if shiftAmountForSmartSource == 1 then -- Shading Darker: Find LIGHTEST
-        local lightestIndex = #palette
-        for _, pixel in ipairs(change.pixels) do
-            if not ColorContext:IsTransparent(pixel.color) then
+    local lightestIndex = -1
+    local darkestIndex = -1
+
+    if shiftAmountForSmartSource == 1 then -- Shading Darker: Find LIGHTEST from cel
+        lightestIndex = #palette -- Start with a value higher than any possible index
+    end
+    -- For darkestIndex, initial -1 is fine.
+
+    for _, p_coord in ipairs(change.pixels) do -- Iterate through brush coordinates
+        local cel_x = p_coord.x - lastCel.position.x
+        local cel_y = p_coord.y - lastCel.position.y
+
+        if cel_x >= 0 and cel_x < image.width and cel_y >= 0 and cel_y < image.height then
+            local originalCelValue = image:getPixel(cel_x, cel_y) -- Read from lastCel.image (aliased as 'image')
+
+            -- Assuming RGBA mode as per user instruction
+            local r,g,b,a = app.pixelColor.rgba(originalCelValue)
+
+            if a > 0 then -- Only consider non-transparent pixels FROM THE CEL
+                -- Create a color object for comparison that ColorContext understands
+                -- This assumes ColorContext:Create can handle a table like {red=r, green=g, blue=b, alpha=a}
+                -- or that pixel.color from change.pixels was already in a format Create could use.
+                -- For direct RGBA values, it's often better to construct an app.Color if ColorContext expects that.
+                -- However, to match existing pattern of comparing with palette colors:
+                local celColorForComparison = ColorContext:Create({red=r, green=g, blue=b, alpha=a})
+
+                local currentCelPaletteIndex = -1
                 for i = 0, #palette - 1 do
-                    if ColorContext:Compare(ColorContext:Create(palette:getColor(i)), pixel.color) then
-                        if i < lightestIndex then lightestIndex = i end
+                    if ColorContext:Compare(ColorContext:Create(palette:getColor(i)), celColorForComparison) then
+                        currentCelPaletteIndex = i
                         break
+                    end
+                end
+
+                if currentCelPaletteIndex ~= -1 then
+                    if shiftAmountForSmartSource == 1 then -- Darker: Find LIGHTEST
+                        if currentCelPaletteIndex < lightestIndex then
+                            lightestIndex = currentCelPaletteIndex
+                        end
+                    elseif shiftAmountForSmartSource == -1 then -- Lighter: Find DARKEST
+                         if darkestIndex == -1 or currentCelPaletteIndex > darkestIndex then -- check for initial -1
+                            darkestIndex = currentCelPaletteIndex
+                        end
                     end
                 end
             end
         end
-        if lightestIndex < #palette then sourceIndexInPalette = lightestIndex end
-    elseif shiftAmountForSmartSource == -1 then -- Shading Lighter: Find DARKEST
-        local darkestIndex = -1
-        for _, pixel in ipairs(change.pixels) do
-            if not ColorContext:IsTransparent(pixel.color) then
-                for i = 0, #palette - 1 do
-                    if ColorContext:Compare(ColorContext:Create(palette:getColor(i)), pixel.color) then
-                        if i > darkestIndex then darkestIndex = i end
-                        break
-                    end
-                end
-            end
-        end
-        if darkestIndex > -1 then sourceIndexInPalette = darkestIndex end
     end
 
-    if sourceIndexInPalette == -1 then return end -- No valid source color found
+    if shiftAmountForSmartSource == 1 then
+        if lightestIndex < #palette then
+            sourceIndexInPalette = lightestIndex
+        else
+            sourceIndexInPalette = -1 -- Ensure -1 if no valid lightest color found
+        end
+    elseif shiftAmountForSmartSource == -1 then
+        -- darkestIndex remains -1 if no valid darkest color found
+        sourceIndexInPalette = darkestIndex
+    end
+
+    if sourceIndexInPalette == -1 then return end -- No valid non-transparent source color found on the cel, so exit.
 
     -- Determine Primary Ramp details and the target local index from the source's shift
     local primaryRampNumber = math.floor(sourceIndexInPalette / rampSize) + 1
