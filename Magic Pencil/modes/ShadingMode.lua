@@ -136,41 +136,22 @@ function ShadingMode:Process(change, sprite, lastCel, options)
             goto continue_pixel_loop -- Pixel from change data is outside cel bounds, skip.
         end
 
-        local isOriginalCelPixelTransparent = false
-        if sprite.colorMode == ColorMode.INDEXED then
-            isOriginalCelPixelTransparent = (originalCelValue == sprite.transparentColorIndex)
-        elseif sprite.colorMode == ColorMode.RGB then -- Check for RGBA
-            local r, g, b, a = palette:getColor(originalCelValue):rgba() -- This might be problematic if originalCelValue is not a palette index
-                                                                      -- For true RGBA images, lastCel.image:getPixel() returns a color value not an index.
-                                                                      -- A better check for RGBA would be directly on the color value if possible,
-                                                                      -- or convert to a color object that ColorContext can understand.
-                                                                      -- For now, assuming indexed or that getColor().alpha is representative.
-                                                                      -- A safer RGBA check if getPixel returns a direct color:
-                                                                      -- local tempColor = app.Color(originalCelValue)
-                                                                      -- isOriginalCelPixelTransparent = (tempColor.alpha == 0)
-                                                                      -- However, Aseprite API for Image:getPixel on RGBA images returns a number that needs app.pixelColor.
-                                                                      -- Let's use a robust way if ColorContext can handle raw pixel values from getPixel.
-                                                                      -- Simpler: if it's RGB, assume it's not transparent unless alpha is explicitly 0.
-                                                                      -- The most common case is indexed, so sprite.transparentColorIndex is key.
-                                                                      -- For RGB, if there's no alpha or alpha is full, it's opaque.
-                                                                      -- This part might need refinement based on how pixel.color from `change` interacts with `ColorContext` for RGBA direct values.
-                                                                      -- Given the script heavily relies on palette indices, focus on INDEXED mode.
-            local tempColor = palette:getColor(originalCelValue) -- This assumes originalCelValue is an index.
-            if tempColor.alpha == 0 then
-                 isOriginalCelPixelTransparent = true
-            end
+        local isOriginalCelPixelFullyTransparent = false
+        if sprite.colorMode == ColorMode.RGB then -- Primary RGBA case
+            local r_val, g_val, b_val, a_val = app.pixelColor.rgba(originalCelValue) -- Use app.pixelColor for direct values
+            isOriginalCelPixelFullyTransparent = (a_val == 0) -- Only skip if fully transparent
+        elseif sprite.colorMode == ColorMode.INDEXED then
+            isOriginalCelPixelFullyTransparent = (originalCelValue == sprite.transparentColorIndex)
         elseif sprite.colorMode == ColorMode.GRAY then
-            local gray, alpha = palette:getColor(originalCelValue):graya()
-            if alpha == 0 then
-                isOriginalCelPixelTransparent = true
-            end
+            local v_val, a_val = app.pixelColor.graya(originalCelValue) -- Use app.pixelColor for direct values
+            isOriginalCelPixelFullyTransparent = (a_val == 0) -- Only skip if fully transparent
         end
 
-        if isOriginalCelPixelTransparent then
-            goto continue_pixel_loop -- Skip this pixel entirely if the cel was originally transparent here
+        if isOriginalCelPixelFullyTransparent then
+            goto continue_pixel_loop -- Skip this pixel if the cel was originally *fully* transparent here
         end
 
-        local originalColor = pixel.color -- This is the color from the brush stroke/change.pixels
+        local originalColor = pixel.color -- This is the color from the brush stroke/change.pixels (e.g. app.fgColor, or existing cel color if not transparent)
         local currentIndexInPalette = -1
         for i = 0, #palette - 1 do
             if ColorContext:Compare(ColorContext:Create(palette:getColor(i)), originalColor) then
