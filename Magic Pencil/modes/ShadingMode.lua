@@ -12,19 +12,37 @@ local ShadingMode = {
 function ShadingMode:Process(change, sprite, lastCel, options)
     if not change.pixels or #change.pixels == 0 then return end
 
+    -- ▼▼▼ START OF FIX ▼▼▼
+
+    -- 1. Get the color the brush painted from the first changed pixel.
+    local paintedColor = change.pixels[1].newColor
+
+    -- 2. Reliably determine the mouse button by checking the color's hue.
+    -- MagicTeal (right-click) has a hue of 180. MagicPink (left-click) has a hue of 300.
+    -- We can check if the hue is greater than the midpoint (240).
+    local shiftAmount = 0
+    if paintedColor.hsvHue > 240 then
+        shiftAmount = -1 -- It's MagicPink, so shift Lighter (Left Mouse Button)
+    else
+        shiftAmount = 1 -- It's MagicTeal, so shift Darker (Right Mouse Button)
+    end
+
+    -- 3. If no button was pressed, exit.
+    if shiftAmount == 0 then return end
+
+    -- ▲▲▲ END OF FIX ▲▲▲
+
+
+    -- The rest of the original function logic continues from here,
+    -- but it now uses the corrected 'shiftAmount' variable.
+    -- The original lines that set shiftAmount based on change.leftPressed/rightPressed
+    -- should be removed.
+
     local rampSize = tonumber(options.rampSize) or 8
     local palette = app.activeSprite.palettes[1]
     local image = lastCel.image
     local drawPixel = image.drawPixel
-    local leftButtonPressed = change.leftPressed
-    local rightPressed = change.rightPressed
     local tolerance = options.shadingTolerance or 0
-
-    -- "SMART SOURCE" & "DIRECTIONAL TOLERANCE" MODEL:
-    local shiftAmount = 0
-    if leftButtonPressed then shiftAmount = -1 end -- Shift Lighter
-    if rightPressed then shiftAmount = 1 end -- Shift Darker
-    if shiftAmount == 0 then return end
 
     -- 1. Scan all pixels in the stroke to find the "smart" source color.
     local sourceIndexInPalette = -1
