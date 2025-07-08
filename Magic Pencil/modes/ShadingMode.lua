@@ -12,103 +12,84 @@ local ShadingMode = {
 function ShadingMode:Process(change, sprite, lastCel, options)
     if not change.pixels or #change.pixels == 0 then return end
 
-    -- ▼▼▼ START OF FIX ▼▼▼
-
-    -- 1. Get the color the brush painted from the first changed pixel.
-    local paintedColor = change.pixels[1].newColor
-
-    -- 2. Reliably determine the mouse button by checking the color's hue.
-    -- MagicTeal (right-click) has a hue of 180. MagicPink (left-click) has a hue of 300.
-    -- We can check if the hue is greater than the midpoint (240).
-    local shiftAmount = 0
-    if paintedColor.hsvHue > 240 then
-        shiftAmount = -1 -- It's MagicPink, so shift Lighter (Left Mouse Button)
-    else
-        shiftAmount = 1 -- It's MagicTeal, so shift Darker (Right Mouse Button)
-    end
-
-    -- 3. If no button was pressed, exit.
-    if shiftAmount == 0 then return end
-
-    -- ▲▲▲ END OF FIX ▲▲▲
-
-
-    -- The rest of the original function logic continues from here,
-    -- but it now uses the corrected 'shiftAmount' variable.
-    -- The original lines that set shiftAmount based on change.leftPressed/rightPressed
-    -- should be removed.
-
+    -- Get options and palette
     local rampSize = tonumber(options.rampSize) or 8
+    local tolerance = options.shadingTolerance or 0
     local palette = app.activeSprite.palettes[1]
     local image = lastCel.image
     local drawPixel = image.drawPixel
-    local tolerance = options.shadingTolerance or 0
 
-    -- 1. Scan all pixels in the stroke to find the "smart" source color.
-    local sourceIndexInPalette = -1
-    if shiftAmount == 1 then -- Shading Darker: Find the LIGHTEST non-transparent color.
-        local lightestIndex = #palette 
+    -- 1. Reliably determine mouse button and shift direction
+    local paintedColor = change.pixels[1].newColor
+    local shiftAmount = 0
+    --[[
+        LMB uses the foreground color (MagicPink, hue ~300)
+        RMB uses the background color (MagicTeal, hue ~180)
+    ]]
+    if paintedColor.hsvHue > 240 then -- Left Mouse Button (MagicPink)
+        shiftAmount = -1 -- Shift Left (Decrement)
+    else -- Right Mouse Button (MagicTeal)
+        shiftAmount = 1 -- Shift Right (Increment)
+    end
+    if shiftAmount == 0 then return end
+
+    -- 2. Find the "Smart Source" pixel using the original file's inverted logic
+    local sourcePixel = nil
+    if shiftAmount == 1 then -- Shading Right/Darker: Find the LIGHTEST color touched
+        local lightestIndex = #palette
         for _, pixel in ipairs(change.pixels) do
             if not ColorContext:IsTransparent(pixel.color) then
-                for i = 0, #palette - 1 do
-                    if ColorContext:Compare(ColorContext:Create(palette:getColor(i)), pixel.color) then
-                        if i < lightestIndex then lightestIndex = i end
-                        break
-                    end
+                if pixel.color.index < lightestIndex then
+                    lightestIndex = pixel.color.index
+                    sourcePixel = pixel
                 end
             end
         end
-        if lightestIndex < #palette then sourceIndexInPalette = lightestIndex end
-
-    elseif shiftAmount == -1 then -- Shading Lighter: Find the DARKEST non-transparent color.
+    elseif shiftAmount == -1 then -- Shading Left/Lighter: Find the DARKEST color touched
         local darkestIndex = -1
         for _, pixel in ipairs(change.pixels) do
             if not ColorContext:IsTransparent(pixel.color) then
-                for i = 0, #palette - 1 do
-                    if ColorContext:Compare(ColorContext:Create(palette:getColor(i)), pixel.color) then
-                        if i > darkestIndex then darkestIndex = i end
-                        break
-                    end
+                if pixel.color.index > darkestIndex then
+                    darkestIndex = pixel.color.index
+                    sourcePixel = pixel
                 end
             end
         end
-        if darkestIndex > -1 then sourceIndexInPalette = darkestIndex end
     end
 
-    if sourceIndexInPalette == -1 then return end
+    if not sourcePixel then return end
 
-    -- 2. Loop through all pixels again and apply the locked shift.
+    -- 3. Calculate the source's local index WITHIN its ramp
+    local sourceRampIndex = sourcePixel.color.index % rampSize
+
+    -- 4. Apply local shift with directional, ramp-based tolerance check
     for _, pixel in ipairs(change.pixels) do
-        local originalColor = pixel.color
-        local currentIndexInPalette = -1
-        for i = 0, #palette - 1 do
-            if ColorContext:Compare(ColorContext:Create(palette:getColor(i)), originalColor) then
-                currentIndexInPalette = i
-                break
+        local originalPaletteIndex = pixel.color.index
+        local rampNumber = math.floor(originalPaletteIndex / rampSize) + 1
+        
+        -- Check 1: Is the pixel's ramp active in the UI?
+        if options["rampCheck" .. rampNumber] then
+            local pixelRampIndex = originalPaletteIndex % rampSize
+
+            -- Check 2: Use directional tolerance on the RAMP indices
+            local isWithinTolerance = false
+            if shiftAmount == 1 then -- Shading Right/Darker: Affect source and colors LIGHTER than it (by ramp index).
+                isWithinTolerance = (pixelRampIndex <= sourceRampIndex + tolerance and pixelRampIndex >= sourceRampIndex)
+            elseif shiftAmount == -1 then -- Shading Left/Lighter: Affect source and colors DARKER than it (by ramp index).
+                isWithinTolerance = (pixelRampIndex >= sourceRampIndex - tolerance and pixelRampIndex <= sourceRampIndex)
             end
-        end
 
-        if currentIndexInPalette ~= -1 then
-            local currentRampNumber = math.floor(currentIndexInPalette / rampSize) + 1
-            
-            if options["rampCheck" .. currentRampNumber] then
-                -- FIX: The directional tolerance logic was inverted. This is the correct logic.
-                local isWithinTolerance = false
-                if shiftAmount == 1 then -- Shading Darker: Affect source and colors LIGHTER than it.
-                    isWithinTolerance = (currentIndexInPalette <= sourceIndexInPalette + tolerance and currentIndexInPalette >= sourceIndexInPalette)
-                elseif shiftAmount == -1 then -- Shading Lighter: Affect source and colors DARKER than it.
-                    isWithinTolerance = (currentIndexInPalette >= sourceIndexInPalette - tolerance and currentIndexInPalette <= sourceIndexInPalette)
-                end
+            if isWithinTolerance then
+                -- Apply shift to the pixel's OWN index
+                local newIndexInPalette = originalPaletteIndex + shiftAmount
+                
+                -- Boundary Check: Ensure the target is within the same ramp
+                if math.floor(newIndexInPalette / rampSize) == (rampNumber - 1) then
+                    local newColor = palette:getColor(newIndexInPalette)
 
-                if isWithinTolerance then
-                    local newIndexInPalette = currentIndexInPalette + shiftAmount
-                    local newRampNumber = math.floor(newIndexInPalette / rampSize) + 1
-
-                    if newRampNumber == currentRampNumber and newIndexInPalette >= 0 and newIndexInPalette < #palette then
-                        local newColor = palette:getColor(newIndexInPalette)
-                        if newColor and not ColorContext:IsTransparent(ColorContext:Create(newColor)) then
-                            drawPixel(image, pixel.x - lastCel.position.x, pixel.y - lastCel.position.y, newColor)
-                        end
+                    -- Stopper Check: Ensure the target color is not transparent
+                    if newColor and not ColorContext:IsTransparent(ColorContext:Create(newColor)) then
+                        drawPixel(image, pixel.x - lastCel.position.x, pixel.y - lastCel.position.y, newColor)
                     end
                 end
             end
