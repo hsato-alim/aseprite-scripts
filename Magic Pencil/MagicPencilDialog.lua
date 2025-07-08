@@ -1,3 +1,5 @@
+-- Magic Pencil/MagicPencilDialog.lua
+
 local ModeProcessorProvider = dofile("./ModeProcessorProvider.lua")
 local GetBoundsForPixels = dofile("./GetBoundsForPixels.lua")
 local Mode = dofile("./Mode.lua")
@@ -10,7 +12,6 @@ local MagicTeal = Color {red = 0, green = 128, blue = 128, alpha = 128}
 
 local ColorModels = {HSV = "HSV", HSL = "HSL", RGB = "RGB"}
 
--- ... (The original script's helper functions remain unchanged) ...
 local function RectangleContains(rect, x, y)
     return x >= rect.x and x <= rect.x + rect.width - 1 and --
     y >= rect.y and y <= rect.y + rect.height - 1
@@ -57,7 +58,7 @@ local function CalculateChangeFromEmpty(cel)
     for x = 0, cel.image.width - 1 do
         for y = 0, cel.image.height - 1 do
             pixelValue = getPixel(cel.image, x, y)
-            if pixelValue > 0 then
+            if not ColorContext:IsTransparentValue(pixelValue) then
                 table.insert(pixels, {
                     x = x + cel.position.x,
                     y = y + cel.position.y,
@@ -173,9 +174,12 @@ local function MagicPencilDialog(options)
     local toleranceSlider
 
     local function UpdateRampsUI()
-        if not dialog or not dialog.data.rampSize then return end
+        if not dialog or not dialog.data.rampSize or not sprite then return end
         local rampSize = tonumber(dialog.data.rampSize)
         if not rampSize then return end
+        
+        local palette = sprite.palettes[1]
+        if not palette then return end
 
         if toleranceSlider then
             dialog:modify{ id="shadingTolerance", max = rampSize - 1 }
@@ -183,29 +187,31 @@ local function MagicPencilDialog(options)
                 dialog:modify{ id="shadingTolerance", value = rampSize - 1 }
             end
         end
-
-        local allRamps = ColorContext:GetColorRampsByDivision(app.activeSprite.palettes[1], rampSize)
+        
+        local numRamps = math.floor(#palette / rampSize)
         for i = 1, 32 do
-            local ramp = allRamps[i]
             local checkId = "rampCheck" .. i
             local shadesId = "rampShades" .. i
-            if ramp then
-                local nativeRampColors = {}
-                for _, colorObj in ipairs(ramp) do
-                    table.insert(nativeRampColors, Color{red=colorObj.red, green=colorObj.green, blue=colorObj.blue, alpha=colorObj.alpha})
+
+            if i <= numRamps then
+                local rampColors = {}
+                local rampStartIndex = (i - 1) * rampSize
+                for j = 0, rampSize - 1 do
+                    table.insert(rampColors, palette:getColor(rampStartIndex + j))
                 end
                 dialog:modify{ id=checkId, visible=true }
-                dialog:modify{ id=shadesId, visible=true, colors=nativeRampColors }
+                dialog:modify{ id=shadesId, visible=true, colors=rampColors }
             else
                 dialog:modify{ id=checkId, visible=false }
                 dialog:modify{ id=shadesId, visible=false }
             end
         end
     end
-
+    
     local function RefreshDialog()
-        local isRGB = sprite and sprite.colorMode == ColorMode.RGB
-        local isIndexed = sprite and sprite.colorMode == ColorMode.INDEXED
+        if not sprite then return end
+        local isRGB = sprite.colorMode == ColorMode.RGB
+        local isIndexed = sprite.colorMode == ColorMode.INDEXED
         local isChange = selectedMode == Mode.Colorize or selectedMode == Mode.Desaturate or selectedMode == Mode.Shift
         local isShading = selectedMode == Mode.Shading
         dialog:modify{id = "selectedMode", visible = isMinimized}
@@ -225,18 +231,17 @@ local function MagicPencilDialog(options)
               :modify{id = Mode.Outline, visible = isRGB and not isMinimized}
               :modify{id = Mode.Shift, visible = isRGB and not isMinimized}
               :modify{id = Mode.Colorize, visible = (isRGB or isIndexed) and not isMinimized}
-              :modify{id = Mode.Shading, visible = not isMinimized}
+              :modify{id = Mode.Shading, visible = isRGB and not isMinimized}
               :modify{id = "indexedModeSeparator", visible = isRGB and isChange}
               :modify{id = "indexedMode", visible = isRGB and isChange, enabled = isRGB}
-              :modify{id = "rampSizeLabel", visible = not isMinimized and isShading}
-              :modify{id = "rampSize", visible = not isMinimized and isShading}
-              :modify{id = "shadingToleranceLabel", visible = not isMinimized and isShading}
-              :modify{id = "shadingTolerance", visible = not isMinimized and isShading}
-              :modify{id = "rampsSeparator", visible = not isMinimized and isShading}
-        -- FIX: Use dialog:modify to safely change widget visibility.
+              :modify{id = "rampSizeLabel", visible = not isMinimized and isShading and isRGB}
+              :modify{id = "rampSize", visible = not isMinimized and isShading and isRGB}
+              :modify{id = "shadingToleranceLabel", visible = not isMinimized and isShading and isRGB}
+              :modify{id = "shadingTolerance", visible = not isMinimized and isShading and isRGB}
+              :modify{id = "rampsSeparator", visible = not isMinimized and isShading and isRGB}
         for i = 1, 32 do
-            dialog:modify{ id="rampCheck" .. i, visible = not isMinimized and isShading }
-            dialog:modify{ id="rampShades" .. i, visible = not isMinimized and isShading }
+            dialog:modify{ id="rampCheck" .. i, visible = not isMinimized and isShading and isRGB }
+            dialog:modify{ id="rampShades" .. i, visible = not isMinimized and isShading and isRGB }
         end
         isRefresh = true
         dialog:show{wait = false}
@@ -275,13 +280,36 @@ local function MagicPencilDialog(options)
             return
         end
         local change = lastCel.empty and CalculateChangeFromEmpty(app.activeCel) or CalculateChange(lastCel, app.activeCel, modeProcessor.canExtend)
+        
+        -- FIX: Handle strokes on purely transparent areas
+        if #change.pixels > 0 and modeProcessor.useMaskColor then
+            local allTransparent = true
+            for _, pixel in ipairs(change.pixels) do
+                if not ColorContext:IsTransparent(pixel.color) then
+                    allTransparent = false
+                    break
+                end
+            end
+            if allTransparent then
+                if lastCel.empty and modeProcessor.deleteOnEmptyCel then
+                    app.activeSprite:deleteCel(app.activeCel)
+                else
+                    app.activeCel.image = lastCel.image
+                end
+                change.leftPressed = false
+                change.rightPressed = false
+            end
+        end
+
         local celToDelete = app.activeCel
-        if #change.pixels == 0 or lastCel.empty and modeProcessor.ignoreEmptyCel then
+        if #change.pixels == 0 or (lastCel.empty and modeProcessor.ignoreEmptyCel) then
             -- Ignore
         elseif change.leftPressed or change.rightPressed then
             modeProcessor:Process(change, sprite, lastCel, dialog.data)
         end
-        if lastCel.empty and modeProcessor.deleteOnEmptyCel then
+        if lastCel.empty and modeProcessor.deleteOnEmptyCel and not celToDelete.sprite then
+            -- Cel was already deleted by transparency fix, do nothing
+        elseif lastCel.empty and modeProcessor.deleteOnEmptyCel then
             app.activeSprite:deleteCel(celToDelete)
         end
         app.refresh()
@@ -315,8 +343,10 @@ local function MagicPencilDialog(options)
 
     local function SelectMode(mode, skipColor)
         selectedMode = mode
+        local isRGB = sprite and sprite.colorMode == ColorMode.RGB
+
         dialog:modify{id = "selectedMode", option = selectedMode}
-        dialog:modify{id = selectedMode, selected = true}
+              :modify{id = selectedMode, selected = true}
         local useMaskColor = ModeProcessorProvider:Get(selectedMode).useMaskColor
         if not skipColor then
             if useMaskColor then
@@ -345,12 +375,12 @@ local function MagicPencilDialog(options)
               :modify{id = "shiftThirdPercentage", visible = selectedMode == Mode.Shift and dialog.data.shiftThirdOption}
               :modify{id = "indexedModeSeparator", visible = isChange}
               :modify{id = "indexedMode", visible = isChange}
-              :modify{id = "rampSizeLabel", visible = isShading}
-              :modify{id = "rampSize", visible = isShading}
-              :modify{id = "shadingToleranceLabel", visible = isShading}
-              :modify{id = "shadingTolerance", visible = isShading}
-              :modify{id = "rampsSeparator", visible = isShading}
-        if isShading then
+              :modify{id = "rampSizeLabel", visible = isShading and isRGB}
+              :modify{id = "rampSize", visible = isShading and isRGB}
+              :modify{id = "shadingToleranceLabel", visible = isShading and isRGB}
+              :modify{id = "shadingTolerance", visible = isShading and isRGB}
+              :modify{id = "rampsSeparator", visible = isShading and isRGB}
+        if isShading and isRGB then
             UpdateRampsUI()
         else
             for i = 1, 32 do
@@ -405,7 +435,12 @@ local function MagicPencilDialog(options)
         dialog:radio{id = mode, text = text, selected = selected, visible = not isMinimized, onclick = function() SelectMode(mode) end}:newrow()
     end
 
-    dialog:combobox{id = "selectedMode", option = Mode.Regular, options = {Mode.Regular, Mode.Graffiti, Mode.OutlineLive, Mode.Cut, Mode.Merge, Mode.Selection, Mode.Mix, Mode.MixProportional, Mode.Outline, Mode.Colorize, Mode.Desaturate, Mode.Shift, Mode.Shading}, visible = isMinimized, onchange = function() SelectMode(dialog.data.selectedMode) end}
+    local availableModes = {Mode.Regular, Mode.Graffiti, Mode.OutlineLive, Mode.Cut, Mode.Merge, Mode.Selection, Mode.Mix, Mode.MixProportional, Mode.Outline, Mode.Colorize, Mode.Desaturate, Mode.Shift}
+    if sprite and sprite.colorMode == ColorMode.RGB then
+        table.insert(availableModes, Mode.Shading)
+    end
+    dialog:combobox{id = "selectedMode", option = Mode.Regular, options = availableModes, visible = isMinimized, onchange = function() SelectMode(dialog.data.selectedMode) end}
+    
     AddMode(Mode.Regular, "Disable", true)
     dialog:separator{id = "effectSeparator", text = "Effect", visible = not isMinimized}
     AddMode(Mode.Graffiti, "Graffiti")
@@ -424,7 +459,9 @@ local function MagicPencilDialog(options)
     AddMode(Mode.Colorize, "Colorize")
     AddMode(Mode.Desaturate, "Desaturate")
     AddMode(Mode.Shift, "Shift")
-    AddMode(Mode.Shading, "Shading")
+    if sprite and sprite.colorMode == ColorMode.RGB then
+        AddMode(Mode.Shading, "Shading")
+    end
     
     dialog:label{ id = "rampSizeLabel", text = "Ramp Size:", visible = false }:combobox{ id = "rampSize", options = { "2", "4", "8", "16", "32" }, option = "8", visible = false, onchange = UpdateRampsUI }
     dialog:label{ id = "shadingToleranceLabel", text = "Tolerance:", visible = false }

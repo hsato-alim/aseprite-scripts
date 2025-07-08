@@ -5,7 +5,7 @@ local ColorContext = dofile("../ColorContext.lua")
 local ShadingMode = {
     canExtend = false,
     ignoreEmptyCel = true,
-    deleteOnEmptyCel = false,
+    deleteOnEmptyCel = true,
     useMaskColor = true
 }
 
@@ -22,10 +22,6 @@ function ShadingMode:Process(change, sprite, lastCel, options)
     -- 1. Reliably determine mouse button and shift direction
     local paintedColor = change.pixels[1].newColor
     local shiftAmount = 0
-    --[[
-        LMB uses the foreground color (MagicPink, hue ~300)
-        RMB uses the background color (MagicTeal, hue ~180)
-    ]]
     if paintedColor.hsvHue > 240 then -- Left Mouse Button (MagicPink)
         shiftAmount = -1 -- Shift Left (Decrement)
     else -- Right Mouse Button (MagicTeal)
@@ -33,25 +29,31 @@ function ShadingMode:Process(change, sprite, lastCel, options)
     end
     if shiftAmount == 0 then return end
 
-    -- 2. Find the "Smart Source" pixel using the original file's inverted logic
+    -- 2. Find the "Smart Source" pixel, ignoring pixels from inactive ramps
     local sourcePixel = nil
-    if shiftAmount == 1 then -- Shading Right/Darker: Find the LIGHTEST color touched
+    if shiftAmount == 1 then -- Shading Right/Darker: Find the LIGHTEST color touched from an ACTIVE ramp
         local lightestIndex = #palette
         for _, pixel in ipairs(change.pixels) do
             if not ColorContext:IsTransparent(pixel.color) then
-                if pixel.color.index < lightestIndex then
-                    lightestIndex = pixel.color.index
-                    sourcePixel = pixel
+                local rampNumber = math.floor(pixel.color.index / rampSize) + 1
+                if options["rampCheck" .. rampNumber] then -- Check if the ramp is active
+                    if pixel.color.index < lightestIndex then
+                        lightestIndex = pixel.color.index
+                        sourcePixel = pixel
+                    end
                 end
             end
         end
-    elseif shiftAmount == -1 then -- Shading Left/Lighter: Find the DARKEST color touched
+    elseif shiftAmount == -1 then -- Shading Left/Lighter: Find the DARKEST color touched from an ACTIVE ramp
         local darkestIndex = -1
         for _, pixel in ipairs(change.pixels) do
             if not ColorContext:IsTransparent(pixel.color) then
-                if pixel.color.index > darkestIndex then
-                    darkestIndex = pixel.color.index
-                    sourcePixel = pixel
+                local rampNumber = math.floor(pixel.color.index / rampSize) + 1
+                if options["rampCheck" .. rampNumber] then -- Check if the ramp is active
+                    if pixel.color.index > darkestIndex then
+                        darkestIndex = pixel.color.index
+                        sourcePixel = pixel
+                    end
                 end
             end
         end
@@ -64,32 +66,34 @@ function ShadingMode:Process(change, sprite, lastCel, options)
 
     -- 4. Apply local shift with directional, ramp-based tolerance check
     for _, pixel in ipairs(change.pixels) do
-        local originalPaletteIndex = pixel.color.index
-        local rampNumber = math.floor(originalPaletteIndex / rampSize) + 1
-        
-        -- Check 1: Is the pixel's ramp active in the UI?
-        if options["rampCheck" .. rampNumber] then
-            local pixelRampIndex = originalPaletteIndex % rampSize
+        if not ColorContext:IsTransparent(pixel.color) then
+            local originalPaletteIndex = pixel.color.index
+            local rampNumber = math.floor(originalPaletteIndex / rampSize) + 1
+            
+            -- Check 1: Is the pixel's ramp active in the UI?
+            if options["rampCheck" .. rampNumber] then
+                local pixelRampIndex = originalPaletteIndex % rampSize
 
-            -- Check 2: Use directional tolerance on the RAMP indices
-            local isWithinTolerance = false
-            if shiftAmount == 1 then -- Shading Right/Darker: Affect source and colors LIGHTER than it (by ramp index).
-                isWithinTolerance = (pixelRampIndex <= sourceRampIndex + tolerance and pixelRampIndex >= sourceRampIndex)
-            elseif shiftAmount == -1 then -- Shading Left/Lighter: Affect source and colors DARKER than it (by ramp index).
-                isWithinTolerance = (pixelRampIndex >= sourceRampIndex - tolerance and pixelRampIndex <= sourceRampIndex)
-            end
+                -- Check 2: Use directional tolerance on the RAMP indices
+                local isWithinTolerance = false
+                if shiftAmount == 1 then -- Shading Right/Darker: Affect source and colors LIGHTER than it (by ramp index).
+                    isWithinTolerance = (pixelRampIndex <= sourceRampIndex + tolerance and pixelRampIndex >= sourceRampIndex)
+                elseif shiftAmount == -1 then -- Shading Left/Lighter: Affect source and colors DARKER than it (by ramp index).
+                    isWithinTolerance = (pixelRampIndex >= sourceRampIndex - tolerance and pixelRampIndex <= sourceRampIndex)
+                end
 
-            if isWithinTolerance then
-                -- Apply shift to the pixel's OWN index
-                local newIndexInPalette = originalPaletteIndex + shiftAmount
-                
-                -- Boundary Check: Ensure the target is within the same ramp
-                if math.floor(newIndexInPalette / rampSize) == (rampNumber - 1) then
-                    local newColor = palette:getColor(newIndexInPalette)
+                if isWithinTolerance then
+                    -- Apply shift to the pixel's OWN index
+                    local newIndexInPalette = originalPaletteIndex + shiftAmount
+                    
+                    -- Boundary Check: Ensure the target is within the same ramp
+                    if math.floor(newIndexInPalette / rampSize) == (rampNumber - 1) then
+                        local newColor = palette:getColor(newIndexInPalette)
 
-                    -- Stopper Check: Ensure the target color is not transparent
-                    if newColor and not ColorContext:IsTransparent(ColorContext:Create(newColor)) then
-                        drawPixel(image, pixel.x - lastCel.position.x, pixel.y - lastCel.position.y, newColor)
+                        -- Stopper Check: Ensure the target color is not transparent
+                        if newColor and not ColorContext:IsTransparent(ColorContext:Create(newColor)) then
+                            drawPixel(image, pixel.x - lastCel.position.x, pixel.y - lastCel.position.y, newColor)
+                        end
                     end
                 end
             end
