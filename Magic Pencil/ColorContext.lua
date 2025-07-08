@@ -57,6 +57,17 @@ function ColorContext:Distance(a, b)
                          (a.blue - b.blue) ^ 2 + (a.alpha - b.alpha) ^ 2)
 end
 
+function ColorContext:DistanceRGBOnly(a, b)
+    -- Ensure colors have RGB components, default to 0 if nil to avoid errors
+    local rA = a.red or 0
+    local gA = a.green or 0
+    local bA = a.blue or 0
+    local rB = b.red or 0
+    local gB = b.green or 0
+    local bB = b.blue or 0
+    return math.sqrt((rA - rB)^2 + (gA - gB)^2 + (bA - bB)^2)
+end
+
 function ColorContext:AverageColorsRGB(colors)
     local r, g, b = 0, 0, 0
 
@@ -130,5 +141,28 @@ function ColorContext:GetColorRampsByDivision(palette, rampSize)
     return allRamps
 end
 
+function ColorContext:GetShiftAmountFromHue(paintedColor)
+    local shiftAmount = 0 -- Default to no shift if color is ambiguous or invalid
+    if paintedColor then
+        -- Grayscale colors might have hsvHue = 0 or nil depending on how they are created or if value is 0.
+        -- Pure black/white might also have nil hue.
+        -- A color is gray if saturation is 0 or value is 0 (black) or value is max and saturation is 0 (white for HSV).
+        -- Aseprite's Color object has an `isGray` property.
+        if paintedColor.isGray then
+            shiftAmount = 0 -- Explicitly no shift for grayscale colors
+        elseif paintedColor.hsvHue ~= nil then
+            if paintedColor.hsvHue > 240 and paintedColor.hsvHue <= 360 then -- MagicPink hue is 300
+                shiftAmount = -1 -- Assumed MagicPink influence (Lighter)
+            elseif paintedColor.hsvHue >= 0 and paintedColor.hsvHue <= 240 then
+                -- MagicTeal hue is 180. This range covers it and other non-pinkish hues.
+                shiftAmount = 1  -- Assumed MagicTeal influence or other (Darker)
+            end
+            -- If hsvHue is exactly 0 or 360 (often red), it falls into the +1 shift.
+            -- If hsvHue is exactly 240, it falls into the +1 shift.
+            -- This logic prioritizes Teal/Darker if not clearly Pink/Lighter.
+        end
+    end
+    return shiftAmount
+end
 
 return ColorContext

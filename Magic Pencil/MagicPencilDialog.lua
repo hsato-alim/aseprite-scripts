@@ -17,8 +17,9 @@ local function RectangleContains(rect, x, y)
 end
 
 local function GetButtonsPressedFromEmpty(pixels)
-    if #pixels == 0 then return end
+    if #pixels == 0 then return false, false end
     local pixel = pixels[1]
+    -- Original logic using ColorContext:Compare
     if ColorContext:Compare(app.fgColor, pixel.newColor) then
         return true, false
     elseif ColorContext:Compare(app.bgColor, pixel.newColor) then
@@ -28,24 +29,37 @@ local function GetButtonsPressedFromEmpty(pixels)
 end
 
 local function GetButtonsPressed(pixels)
-    if #pixels == 0 then return false, false end
+    if #pixels == 0 then
+        return false, false
+    end
+
     local leftPressed, rightPressed = false, false
     local pixel = pixels[1]
+
+    local originalPixelColor = pixel.color or ColorContext:Create(0)
+    local newPixelColor = pixel.newColor or ColorContext:Create(0)
+
     if ColorContext:IsTransparent(app.fgColor) and
-        not ColorContext:IsTransparent(pixel.newColor) then
+        not ColorContext:IsTransparent(newPixelColor) then
         return false, true
     elseif ColorContext:IsTransparent(app.bgColor) and
-        not ColorContext:IsTransparent(pixel.newColor) then
+        not ColorContext:IsTransparent(newPixelColor) then
         return true, false
     end
-    local fgColorDistance = ColorContext:Distance(pixel.newColor, app.fgColor) -
-                                ColorContext:Distance(pixel.color, app.fgColor)
-    local bgColorDistance = ColorContext:Distance(pixel.newColor, app.bgColor) -
-                                ColorContext:Distance(pixel.color, app.bgColor)
-    if fgColorDistance < bgColorDistance then
+
+    -- Using ColorContext:DistanceRGBOnly (This is the corrected logic that fixed shiftAmount)
+    local distNewToFg = ColorContext:DistanceRGBOnly(newPixelColor, app.fgColor)
+    local distOldToFg = ColorContext:DistanceRGBOnly(originalPixelColor, app.fgColor)
+    local distNewToBg = ColorContext:DistanceRGBOnly(newPixelColor, app.bgColor)
+    local distOldToBg = ColorContext:DistanceRGBOnly(originalPixelColor, app.bgColor)
+
+    local fgColorDistance_calc = distNewToFg - distOldToFg
+    local bgColorDistance_calc = distNewToBg - distOldToBg
+
+    if fgColorDistance_calc < bgColorDistance_calc then
         leftPressed = true
     else
-        rightPressed = true
+        rightPressed = true -- If distances are equal, defaults to rightPressed. This behavior is preserved.
     end
     return leftPressed, rightPressed
 end
@@ -67,7 +81,7 @@ local function CalculateChangeFromEmpty(cel)
             end
         end
     end
-    local leftPressed, rightPressed = GetButtonsPressedFromEmpty(pixels)
+    local leftPressed, rightPressed = GetButtonsPressedFromEmpty(pixels) -- Expecting two return values
     return {
         pixels = pixels,
         bounds = cel.bounds,
@@ -169,7 +183,7 @@ local function MagicPencilDialog(options)
     local lastFgColor = ColorContext:Copy(app.fgColor)
     local lastBgColor = ColorContext:Copy(app.bgColor)
     local isMinimized = options.isminimized
-    
+
     local toleranceSlider
 
     local function UpdateRampsUI()
@@ -375,7 +389,7 @@ local function MagicPencilDialog(options)
     local onBgColorChange = function()
         local modeProcessor = ModeProcessorProvider:Get(selectedMode)
         if not (app.bgColor.rgbaPixel == MagicTeal.rgbaPixel) then
-            if modeProcessor.useMaskColor then
+            if modeProcessor and modeProcessor.useMaskColor then
                 SelectMode(Mode.Regular, true)
                 resetColors = true
             end
@@ -393,11 +407,14 @@ local function MagicPencilDialog(options)
             app.events:off(onSiteChange)
             app.events:off(onFgColorListener)
             app.events:off(onBgColorListener)
-            app.fgColor = lastFgColor
-            app.bgColor = lastBgColor
             app.events:off(onBeforeCommandListener)
             app.events:off(onAfterCommandListener)
             resetColorsTimer:stop()
+
+            if ModeProcessorProvider:Get(selectedMode).useMaskColor then
+                 app.fgColor = lastFgColor
+                 app.bgColor = lastBgColor
+            end
             options.onclose(isMinimized)
         end
     }
@@ -466,3 +483,5 @@ local function MagicPencilDialog(options)
 end
 
 return MagicPencilDialog
+
+[end of Magic Pencil/MagicPencilDialog.lua]
