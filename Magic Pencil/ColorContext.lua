@@ -142,25 +142,29 @@ function ColorContext:GetColorRampsByDivision(palette, rampSize)
 end
 
 function ColorContext:GetShiftAmountFromHue(paintedColor)
-    local shiftAmount = 0 -- Default to no shift if color is ambiguous or invalid
+    local shiftAmount = 0 -- Default to no shift
     if paintedColor then
-        -- Grayscale colors might have hsvHue = 0 or nil depending on how they are created or if value is 0.
-        -- Pure black/white might also have nil hue.
-        -- A color is gray if saturation is 0 or value is 0 (black) or value is max and saturation is 0 (white for HSV).
-        -- Aseprite's Color object has an `isGray` property.
-        if paintedColor.isGray then
-            shiftAmount = 0 -- Explicitly no shift for grayscale colors
+        -- Check for grayscale using hsvSaturation.
+        -- Pure black (value=0) or pure white (value=1, saturation=0) are also grayscale.
+        -- Aseprite's .hsvSaturation is 0 for grays, black, and white.
+        -- .hsvHue might be 0 for grays, or nil for pure black/white depending on Aseprite version.
+        if paintedColor.hsvSaturation == 0 then
+            shiftAmount = 0 -- No shift for grayscale colors (including black and white)
         elseif paintedColor.hsvHue ~= nil then
-            if paintedColor.hsvHue > 240 and paintedColor.hsvHue <= 360 then -- MagicPink hue is 300
-                shiftAmount = -1 -- Assumed MagicPink influence (Lighter)
-            elseif paintedColor.hsvHue >= 0 and paintedColor.hsvHue <= 240 then
-                -- MagicTeal hue is 180. This range covers it and other non-pinkish hues.
-                shiftAmount = 1  -- Assumed MagicTeal influence or other (Darker)
+            -- MagicPink hue is ~300. MagicTeal hue is ~180.
+            -- Midpoint is (300+180)/2 = 480/2 = 240.
+            -- Hues are 0-360.
+            if paintedColor.hsvHue > 240 and paintedColor.hsvHue <= 360 then
+                shiftAmount = -1 -- Closer to MagicPink (Lighter intent)
+            else
+                -- This covers hues from 0 up to and including 240.
+                -- This includes MagicTeal's 180 and also red (hue 0 or 360).
+                -- If it's not pinkish, assume tealish/darken.
+                shiftAmount = 1  -- Closer to MagicTeal or other (Darker intent)
             end
-            -- If hsvHue is exactly 0 or 360 (often red), it falls into the +1 shift.
-            -- If hsvHue is exactly 240, it falls into the +1 shift.
-            -- This logic prioritizes Teal/Darker if not clearly Pink/Lighter.
         end
+        -- If paintedColor exists but hsvSaturation is not 0 AND hsvHue is nil,
+        -- shiftAmount remains 0 (e.g. for an invalid color object if that can occur).
     end
     return shiftAmount
 end
