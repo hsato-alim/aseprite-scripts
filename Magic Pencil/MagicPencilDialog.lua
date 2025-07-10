@@ -234,11 +234,11 @@ local function MagicPencilDialog(options)
               :modify{id = Mode.Shading, visible = isRGB and not isMinimized}
               :modify{id = "indexedModeSeparator", visible = isRGB and isChange}
               :modify{id = "indexedMode", visible = isRGB and isChange, enabled = isRGB}
-              :modify{id = "rampSizeLabel", visible = not isMinimized and isShading and isRGB}
-              :modify{id = "rampSize", visible = not isMinimized and isShading and isRGB}
-              :modify{id = "shadingToleranceLabel", visible = not isMinimized and isShading and isRGB}
-              :modify{id = "shadingTolerance", visible = not isMinimized and isShading and isRGB}
-              :modify{id = "rampsSeparator", visible = not isMinimized and isShading and isRGB}
+              :modify{id = "rampSizeLabel", visible = isShading and isRGB}
+              :modify{id = "rampSize", visible = isShading and isRGB}
+              :modify{id = "shadingToleranceLabel", visible = isShading and isRGB}
+              :modify{id = "shadingTolerance", visible = isShading and isRGB}
+              :modify{id = "rampsSeparator", visible = isShading and isRGB}
         for i = 1, 32 do
             dialog:modify{ id="rampCheck" .. i, visible = not isMinimized and isShading and isRGB }
             dialog:modify{ id="rampShades" .. i, visible = not isMinimized and isShading and isRGB }
@@ -247,8 +247,11 @@ local function MagicPencilDialog(options)
         dialog:show{wait = false}
         dialog:close()
         local newBounds = Rectangle(dialog.bounds)
-        newBounds.width = (isMinimized and 125 or 88) * app.preferences.general["ui_scale"]
+        newBounds.width = (isMinimized and 256 or 192) * app.preferences.general["ui_scale"]
         dialog:show{wait = false, bounds = newBounds}
+        if selectedMode == Mode.Shading and sprite.colorMode == ColorMode.RGB then
+            UpdateRampsUI()
+        end
     end
 
     local function UpdateLast()
@@ -281,26 +284,6 @@ local function MagicPencilDialog(options)
         end
         local change = lastCel.empty and CalculateChangeFromEmpty(app.activeCel) or CalculateChange(lastCel, app.activeCel, modeProcessor.canExtend)
         
-        -- FIX: Handle strokes on purely transparent areas
-        if #change.pixels > 0 and modeProcessor.useMaskColor then
-            local allTransparent = true
-            for _, pixel in ipairs(change.pixels) do
-                if not ColorContext:IsTransparent(pixel.color) then
-                    allTransparent = false
-                    break
-                end
-            end
-            if allTransparent then
-                if lastCel.empty and modeProcessor.deleteOnEmptyCel then
-                    app.activeSprite:deleteCel(app.activeCel)
-                else
-                    app.activeCel.image = lastCel.image
-                end
-                change.leftPressed = false
-                change.rightPressed = false
-            end
-        end
-
         local celToDelete = app.activeCel
         if #change.pixels == 0 or (lastCel.empty and modeProcessor.ignoreEmptyCel) then
             -- Ignore
@@ -435,10 +418,8 @@ local function MagicPencilDialog(options)
         dialog:radio{id = mode, text = text, selected = selected, visible = not isMinimized, onclick = function() SelectMode(mode) end}:newrow()
     end
 
-    local availableModes = {Mode.Regular, Mode.Graffiti, Mode.OutlineLive, Mode.Cut, Mode.Merge, Mode.Selection, Mode.Mix, Mode.MixProportional, Mode.Outline, Mode.Colorize, Mode.Desaturate, Mode.Shift}
-    if sprite and sprite.colorMode == ColorMode.RGB then
-        table.insert(availableModes, Mode.Shading)
-    end
+    local availableModes = {Mode.Regular, Mode.Graffiti, Mode.OutlineLive, Mode.Cut, Mode.Merge, Mode.Selection, Mode.Mix, Mode.MixProportional, Mode.Outline, Mode.Colorize, Mode.Desaturate, Mode.Shift, Mode.Shading}
+    dialog:separator():check{id = "minimize-check", text = "Minimize", selected = isMinimized, onclick = ToggleMinimize}
     dialog:combobox{id = "selectedMode", option = Mode.Regular, options = availableModes, visible = isMinimized, onchange = function() SelectMode(dialog.data.selectedMode) end}
     
     AddMode(Mode.Regular, "Disable", true)
@@ -459,16 +440,14 @@ local function MagicPencilDialog(options)
     AddMode(Mode.Colorize, "Colorize")
     AddMode(Mode.Desaturate, "Desaturate")
     AddMode(Mode.Shift, "Shift")
-    if sprite and sprite.colorMode == ColorMode.RGB then
-        AddMode(Mode.Shading, "Shading")
-    end
+    AddMode(Mode.Shading, "Shading")
     
     dialog:label{ id = "rampSizeLabel", text = "Ramp Size:", visible = false }:combobox{ id = "rampSize", options = { "2", "4", "8", "16", "32" }, option = "8", visible = false, onchange = UpdateRampsUI }
     dialog:label{ id = "shadingToleranceLabel", text = "Tolerance:", visible = false }
     toleranceSlider = dialog:slider{ id = "shadingTolerance", min = 0, max = 7, value = 0, visible = false }
     dialog:separator{ id = "rampsSeparator", text = "Active Ramps", visible = false }
     for i = 1, 32 do
-        local check = dialog:check{ id = "rampCheck" .. i, text = "", selected = true, visible = false }
+        local check = dialog:check{ id = "rampCheck" .. i, text = "Ramp " .. i, selected = true, visible = false }
         dialog:shades{ id = "rampShades" .. i, colors = {}, visible = false, onclick = function() check.selected = not check.selected end }:newrow()
     end
 
@@ -485,7 +464,6 @@ local function MagicPencilDialog(options)
         dialog:modify{id = "shiftFirstOption", text = firstOption}:modify{id = "shiftSecondOption", text = secondOption}:modify{id = "shiftThirdOption", text = thirdOption}
     end}:check{id = "shiftFirstOption", text = "Hue", selected = true, visible = false, onclick = onShiftOptionClick}:slider{id = "shiftFirstPercentage", min = 1, max = 100, value = 5, visible = false}:check{id = "shiftSecondOption", text = "Saturation", selected = false, visible = false, onclick = onShiftOptionClick}:slider{id = "shiftSecondPercentage", min = 1, max = 100, value = 5, visible = false}:check{id = "shiftThirdOption", text = "Value", selected = false, visible = false, onclick = onShiftOptionClick}:slider{id = "shiftThirdPercentage", min = 1, max = 100, value = 5, visible = false}
     dialog:separator{id = "indexedModeSeparator"}:check{id = "indexedMode", text = "Indexed Mode"}
-    dialog:separator():check{id = "minimize-check", text = "Minimize", selected = isMinimized, onclick = ToggleMinimize}
 
     resetColorsTimer = Timer {
         interval = 1 / 6,
