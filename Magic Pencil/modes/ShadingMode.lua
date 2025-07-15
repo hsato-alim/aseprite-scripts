@@ -19,15 +19,16 @@ function ShadingMode:Process(change, sprite, lastCel, options)
     local image = lastCel.image
     local drawPixel = image.drawPixel
 
-    -- 1. Reliably determine mouse button and shift direction
-    local paintedColor = change.pixels[1].newColor
+    -- 1. Determine shift direction from the pre-calculated change object.
+    -- The main dialog script has already done the reliable color distance check for us.
     local shiftAmount = 0
-    if paintedColor.hsvHue > 240 then -- Left Mouse Button (MagicPink)
-        shiftAmount = -1 -- Shift Left (Decrement)
-    else -- Right Mouse Button (MagicTeal)
-        shiftAmount = 1 -- Shift Right (Increment)
+    if change.leftPressed then
+        shiftAmount = -1 -- Shift Left (Lighter)
+    elseif change.rightPressed then
+        shiftAmount = 1 -- Shift Right (Darker)
+    else
+        return -- No relevant button was pressed.
     end
-    if shiftAmount == 0 then return end
 
     -- 2. Find the "Smart Source" pixel, ignoring pixels from inactive ramps
     local sourcePixel = nil
